@@ -1,108 +1,98 @@
-import { Handle, Position, NodeProps } from 'reactflow';
-import { NodeData } from '@/types/flow';
-import { useState } from 'react';
-import NodeDescriptionModal from './NodeDescriptionModal';
+"""
+Node Router Module
 
-const getNodeStyles = (type: string = 'default') => {
-  const baseStyles = "px-4 py-3 shadow-lg rounded-lg border transition-all duration-200 ease-in-out transform hover:scale-105 cursor-pointer";
-  
-  switch (type) {
-    case 'input':
-      return `${baseStyles} bg-gradient-to-br from-blue-50 to-white border-blue-200`;
-    case 'process':
-      return `${baseStyles} bg-gradient-to-br from-purple-50 to-white border-purple-200`;
-    case 'output':
-      return `${baseStyles} bg-gradient-to-br from-green-50 to-white border-green-200`;
-    default:
-      return `${baseStyles} bg-gradient-to-br from-gray-50 to-white border-gray-200`;
-  }
-};
+This module handles endpoints related to node information and descriptions.
+"""
 
-const getHandleStyles = (type: string = 'default') => {
-  const baseStyles = "w-2 h-2 min-w-[8px] min-h-[8px] border-2 border-white transition-colors duration-200";
-  
-  switch (type) {
-    case 'input':
-      return `${baseStyles} !bg-blue-400 hover:!bg-blue-500`;
-    case 'process':
-      return `${baseStyles} !bg-purple-400 hover:!bg-purple-500`;
-    case 'output':
-      return `${baseStyles} !bg-green-400 hover:!bg-green-500`;
-    default:
-      return `${baseStyles} !bg-gray-400 hover:!bg-gray-500`;
-  }
-};
+import json
+import os
+from fastapi import APIRouter, HTTPException, status
+from typing import Dict, Any
 
-const getTypeStyles = (type: string = 'default') => {
-  switch (type) {
-    case 'input':
-      return 'text-blue-600';
-    case 'process':
-      return 'text-purple-600';
-    case 'output':
-      return 'text-green-600';
-    default:
-      return 'text-gray-500';
-  }
-};
+# Configure router
+router = APIRouter(
+    prefix="/api/nodes",
+    tags=["Nodes"],
+    responses={
+        404: {"description": "Node not found"},
+        500: {"description": "Internal server error"},
+    }
+)
 
-export default function CustomNode({ data, id }: NodeProps<NodeData>) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const nodeType = data.type || 'default';
-  const inputCount = data.inputs?.length || 0;
-  const outputCount = data.outputs?.length || 0;
+# Load node descriptions from JSON file
+def load_node_descriptions() -> Dict[str, Any]:
+    """Load node descriptions from the JSON file."""
+    try:
+        file_path = os.path.join(os.path.dirname(__file__), "../data/node_descriptions.json")
+        with open(file_path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading node descriptions: {str(e)}")
+        return {}
 
-  const handleNodeClick = () => {
-    setIsModalOpen(true);
-  };
-
-  return (
-    <>
-      <div 
-        className={getNodeStyles(nodeType)}
-        onClick={handleNodeClick}
-      >
-        {/* Input Handles */}
-        {inputCount > 0 && data.inputs?.map((handleId, index) => (
-          <Handle
-            key={handleId}
-            type="target"
-            position={Position.Left}
-            id={handleId}
-            className={getHandleStyles(nodeType)}
-            style={{
-              top: `${(index + 1) * (100 / (inputCount + 1))}%`,
-            }}
-          />
-        ))}
-
-        {/* Node Content */}
-        <div className="flex flex-col items-center">
-          <div className="text-sm font-medium">{data.label}</div>
-          <div className={`text-xs ${getTypeStyles(nodeType)}`}>{nodeType}</div>
-        </div>
-
-        {/* Output Handles */}
-        {outputCount > 0 && data.outputs?.map((handleId, index) => (
-          <Handle
-            key={handleId}
-            type="source"
-            position={Position.Right}
-            id={handleId}
-            className={getHandleStyles(nodeType)}
-            style={{
-              top: `${(index + 1) * (100 / (outputCount + 1))}%`,
-            }}
-          />
-        ))}
-      </div>
-
-      {/* Description Modal */}
-      <NodeDescriptionModal
-        nodeId={id}
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-      />
-    </>
-  );
-}
+@router.get(
+    "/{node_id}/description",
+    response_model=Dict[str, str],
+    summary="Get node description",
+    description="Get the HTML description for a specific node",
+    responses={
+        200: {
+            "description": "Successful response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "description_html": "<div class='p-4'>...</div>"
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Node not found",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Node not found"
+                    }
+                }
+            }
+        }
+    }
+)
+async def get_node_description(node_id: str) -> Dict[str, str]:
+    """
+    Get the HTML description for a specific node.
+    
+    Args:
+        node_id: ID of the node
+        
+    Returns:
+        Dict containing HTML description
+        
+    Raises:
+        HTTPException: 
+            - 404 if node not found
+            - 500 if there's an error loading descriptions
+    """
+    descriptions = load_node_descriptions()
+    
+    if not descriptions:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error loading node descriptions"
+        )
+    
+    if node_id not in descriptions:
+        # Return a default description for unknown nodes
+        return {
+            "description_html": f"""
+            <div class='p-6 space-y-4'>
+                <h2 class='text-2xl font-bold text-gray-900'>Node {node_id}</h2>
+                <div class='bg-gray-50 p-4 rounded-lg'>
+                    <h3 class='text-lg font-semibold text-gray-900 mb-2'>Overview</h3>
+                    <p class='text-gray-700'>This is a custom node in your pipeline.</p>
+                </div>
+            </div>
+            """
+        }
+    
+    return descriptions[node_id]
