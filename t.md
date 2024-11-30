@@ -1,141 +1,40 @@
-ai_router.py:
-"""
-"""
-AI Router Module
+Certainly! Based on your requirements and the file locations you've provided, I'll guide you through how to modify your `ai_router.py` to interact with `main.py` while preserving the back-and-forth chat functionality and returning the AI's response and graph data in JSON format.
 
-This module handles all AI-related endpoints, including message processing
-and graph manipulation through natural language commands.
-"""
+---
 
-from fastapi import APIRouter, HTTPException, status
-from app.schemas.schemas import MessageRequest, MessageResponse
-from app.services.ai_service import generate_ai_response
-from typing import List
-import logging
+## Overview
 
-# Configure logging
-logger = logging.getLogger(__name__)
+**Objective:**
 
-router = APIRouter(
-    prefix="/ai",
-    tags=["AI"],
-    responses={
-        404: {"description": "Not found"},
-        500: {"description": "Internal server error"},
-    }
-)
+- **Keep `main.py` and related scripts in their current location** (`/Users/ysharm12/Documents/orchestra/AI/main.py`) with minimal modifications.
+- **Modify `ai_router.py` to call `main.py` as a subprocess**, passing the user's message.
+- **Preserve the conversation history** (back-and-forth chat) across requests.
+- **Ensure the AI response and graph data are returned in JSON format** via the API.
 
-@router.post(
-    "/message",
-    response_model=MessageResponse,
-    summary="Process a user message",
-    description="""
-    Process a message from the user and return an AI response along with any graph updates.
-    
-    The endpoint accepts natural language commands such as:
-    - "add node": Creates a new node
-    - "remove node X": Removes node number X
-    - "list nodes": Lists all current nodes
-    
-    The response includes:
-    - AI's text response
-    - Any new or updated nodes
-    - Any new or updated edges between nodes
-    """,
-    responses={
-        200: {
-            "description": "Successful response",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "ai_response": "Node 1 added successfully.",
-                        "nodes": [{
-                            "id": "123e4567-e89b-12d3-a456-426614174000",
-                            "type": "default",
-                            "data": {"label": "Node 1"},
-                            "position": {"x": 250.0, "y": 150.0}
-                        }],
-                        "edges": []
-                    }
-                }
-            }
-        },
-        400: {
-            "description": "Bad request",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "User message cannot be empty."
-                    }
-                }
-            }
-        }
-    }
-)
-async def process_message(request: MessageRequest):
-    """
-    Process a message from the user and generate an AI response with graph updates.
-    
-    Args:
-        request: The message request containing user message and conversation history
-        
-    Returns:
-        MessageResponse containing AI's response and any graph updates
-        
-    Raises:
-        HTTPException: 
-            - 400 if message is empty or invalid
-            - 422 if conversation history is invalid
-            - 500 if AI service encounters an error
-    """
-    logger.info(f"Processing user message: {request.user_message}")
-    try:
-        # Validate user message
-        if not request.user_message or not request.user_message.strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User message cannot be empty."
-            )
-            
-        # Validate conversation history
-        if request.conversation_history:
-            if not isinstance(request.conversation_history, List):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Conversation history must be a list of strings."
-                )
-            if any(not isinstance(msg, str) for msg in request.conversation_history):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="All conversation history items must be strings."
-                )
-            
-        # Generate response
-        response = generate_ai_response(request.user_message, request.conversation_history)
-        logger.info(f"Successfully generated AI response for user message: {request.user_message}")
-        return response
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        # Log the actual error but return a generic message
-        logger.error(f"Error processing AI message: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while processing your request. Please try again later."
-        )
+---
 
-"""
+## Steps to Implement
 
+1. **Modify `main.py` to Accept Command-Line Arguments (Minimal Changes).**
+2. **Update `ai_router.py` to Run `main.py` as a Subprocess.**
+3. **Handle Session Management to Preserve Conversation History.**
+4. **Read the AI Response and Graph Data from Files Generated by `main.py`.**
+5. **Return the AI Response and Graph Data in JSON Format via the API.**
 
+---
 
-main.py:
-"""
-# main.py
+## Step 1: Modify `main.py` to Accept Command-Line Arguments
+
+We need `main.py` to accept the user input as a command-line argument so that it can be invoked by `ai_router.py` with the user's message.
+
+### **Modified `main.py`**
+
+```python
+# /Users/ysharm12/Documents/orchestra/AI/main.py
 
 import asyncio
 import os
+import sys
 import uuid
 import re
 import subprocess
@@ -143,36 +42,37 @@ from parent_agent import process_user_input
 from llm import call_parent
 
 async def main():
-    # Use a static session ID
+    # Check if user input is provided as a command-line argument
+    if len(sys.argv) > 1:
+        user_input = sys.argv[1]
+    else:
+        # Interactive mode
+        user_input = input("\nEnter your query or modification request: ")
+
+    # Use a static session ID (can be made dynamic if needed)
     session_id = 'static_session'
 
     # Create a session directory
-    session_dir = os.path.join('sessions', session_id)
+    session_dir = os.path.join('/Users/ysharm12/Documents/orchestra/AI/sessions', session_id)
     os.makedirs(session_dir, exist_ok=True)
 
-    while True:
-        user_input = input("\nEnter your query or modification request: ")
+    ai_response, scripts = await process_user_input(user_input, session_dir)
 
-        ai_response, scripts = await process_user_input(user_input, session_dir)
-
-        if not scripts:
-            print("No scripts were generated or updated.")
-            continue
-
+    if not scripts:
+        print("No scripts were generated or updated.")
+    else:
         # Save scripts to files
         await save_scripts(scripts, session_dir)
 
-        # Save the AI response
-        await save_ai_response(ai_response, session_dir)
+    # Save the AI response
+    await save_ai_response(ai_response, session_dir)
 
-        # Display the AI response
-        print("\nAI Response:")
-        print(ai_response)
+    # Display the AI response
+    print("\nAI Response:")
+    print(ai_response)
 
-        # Update the graph
-        await run_graph_builder(session_dir)
-
-        # Continue the loop without prompting
+    # Update the graph
+    await run_graph_builder(session_dir)
 
 async def save_scripts(scripts, session_dir):
     """
@@ -210,9 +110,12 @@ async def run_graph_builder(session_dir):
     """
     Runs the graph_builder.py script to generate the API response.
     """
+    # Path to graph_builder.py
+    graph_builder_path = os.path.join('/Users/ysharm12/Documents/orchestra/AI', 'graph_builder.py')
+
     try:
         result = subprocess.run(
-            ['python3', 'graph_builder.py', session_dir],
+            ['python3', graph_builder_path, session_dir],
             capture_output=True,
             text=True
         )
@@ -227,5 +130,256 @@ async def run_graph_builder(session_dir):
         print(f"An error occurred while running graph_builder.py: {e}")
 
 if __name__ == "__main__":
-        asyncio.run(main())
-"""
+    asyncio.run(main())
+```
+
+**Key Changes:**
+
+- **Command-Line Argument Handling:**
+  - Checks `sys.argv` for user input.
+  - If provided, uses it; otherwise, defaults to interactive mode.
+
+- **Absolute Paths:**
+  - Updated `session_dir` to use an absolute path.
+  - Modified `graph_builder.py` path in `run_graph_builder` to be absolute.
+
+- **No Other Changes to Logic:**
+  - The rest of `main.py` remains unchanged.
+
+---
+
+## Step 2: Update `ai_router.py` to Run `main.py` as a Subprocess
+
+Modify `ai_router.py` to call `main.py` using `subprocess.run`, passing the user's message as a command-line argument.
+
+### **Modified `ai_router.py`**
+
+```python
+# /Users/ysharm12/Documents/orchestra/orchestra/orchestra-backend/app/routers/ai_router.py
+
+from fastapi import APIRouter, HTTPException, status
+from app.schemas.schemas import MessageRequest, MessageResponse
+import logging
+import subprocess
+import json
+import os
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/ai",
+    tags=["AI"],
+    # ... (existing configuration)
+)
+
+@router.post(
+    "/message",
+    response_model=MessageResponse,
+    # ... (existing decorator parameters)
+)
+async def process_message(request: MessageRequest):
+    logger.info(f"Processing user message: {request.user_message}")
+    try:
+        # Validate user message
+        if not request.user_message.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User message cannot be empty."
+            )
+
+        # Paths to scripts and session directory
+        main_script_path = '/Users/ysharm12/Documents/orchestra/AI/main.py'
+        session_dir = '/Users/ysharm12/Documents/orchestra/AI/sessions/static_session'
+
+        # Ensure the session directory exists
+        os.makedirs(session_dir, exist_ok=True)
+
+        # Run main.py as a subprocess with the user message
+        result = subprocess.run(
+            ['python3', main_script_path, request.user_message],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            # Handle error
+            logger.error(f"Error running main.py: {result.stderr}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error processing the AI response."
+            )
+
+        # Read the api_response.json file generated by main.py
+        api_response_file = os.path.join(session_dir, 'api_response.json')
+        if os.path.exists(api_response_file):
+            with open(api_response_file, 'r') as f:
+                api_response = json.load(f)
+        else:
+            logger.error("api_response.json not found.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="AI response not found."
+            )
+
+        # Construct the MessageResponse object
+        response = MessageResponse(
+            ai_response=api_response.get('ai_response', ''),
+            nodes=api_response.get('nodes', []),
+            edges=api_response.get('edges', [])
+        )
+
+        logger.info(f"Successfully generated AI response for user message: {request.user_message}")
+        return response
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        # Log the actual error but return a generic message
+        logger.error(f"Error processing AI message: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing your request. Please try again later."
+        )
+```
+
+**Explanation:**
+
+- **Running `main.py` as a Subprocess:**
+  - Uses `subprocess.run` to execute `main.py`, passing the user's message.
+  - Captures `stdout` and `stderr`.
+
+- **Session Directory:**
+  - Uses the same `session_dir` as `main.py` to access generated files.
+
+- **Reading the AI Response and Graph Data:**
+  - Reads `api_response.json` generated by `main.py`.
+  - Constructs the API response from the JSON data.
+
+- **Error Handling:**
+  - Checks the return code of the subprocess.
+  - Handles missing `api_response.json` file.
+  - Logs errors and raises appropriate HTTP exceptions.
+
+---
+
+## Step 3: Handle Session Management to Preserve Conversation History
+
+To maintain the conversation history (back-and-forth chat), both `main.py` and `ai_router.py` need to use the same session directory.
+
+**Current Approach:**
+
+- **Static Session ID:**
+  - Using `'static_session'` as the session ID.
+  - Session data is stored in `/Users/ysharm12/Documents/orchestra/AI/sessions/static_session`.
+
+**For Multiple Users:**
+
+- If you plan to support multiple users or sessions, consider generating unique session IDs per user or per session.
+
+- **Example:**
+
+  ```python
+  import uuid
+
+  session_id = request.cookies.get('session_id')
+  if not session_id:
+      session_id = str(uuid.uuid4())
+      response.set_cookie(key='session_id', value=session_id)
+  session_dir = os.path.join('/Users/ysharm12/Documents/orchestra/AI/sessions', session_id)
+  ```
+
+**Note:**
+
+- For now, since you're using a static session ID, the conversation history will be maintained across requests using the same session directory.
+
+---
+
+## Step 4: Read the AI Response and Graph Data from Files Generated by `main.py`
+
+`main.py` generates `api_response.json` in the session directory. `ai_router.py` reads this file to construct the API response.
+
+**Ensure `main.py` Generates `api_response.json`:**
+
+- In `main.py`, the `run_graph_builder` function invokes `graph_builder.py`, which should output `api_response.json`.
+
+- Verify that `graph_builder.py` saves the API response to `api_response.json` in the session directory.
+
+---
+
+## Step 5: Return the AI Response and Graph Data in JSON Format via the API
+
+- `ai_router.py` constructs a `MessageResponse` object using the data read from `api_response.json`.
+
+- The API returns this response to the client in JSON format.
+
+---
+
+## Additional Considerations
+
+### **1. Adjust Paths in `graph_builder.py`**
+
+Ensure that `graph_builder.py` uses absolute paths or paths relative to the correct directories.
+
+- **Modify `graph_builder.py` if Necessary:**
+  - Update paths to scripts and session directories.
+  - Ensure it can be executed from `main.py` without issues.
+
+### **2. Permissions and Access**
+
+- Ensure that the FastAPI application has the necessary permissions to read and write to the session directory and execute `main.py`.
+
+### **3. Logging**
+
+- Configure logging in both `main.py` and `ai_router.py` to aid in debugging.
+
+- Example in `main.py`:
+
+  ```python
+  import logging
+
+  logging.basicConfig(level=logging.INFO)
+  logger = logging.getLogger(__name__)
+
+  # Use logger instead of print statements
+  logger.info("AI Response:")
+  logger.info(ai_response)
+  ```
+
+### **4. Testing**
+
+- Test the endpoint with different user messages to ensure that:
+
+  - The conversation history is maintained.
+  - The AI responds appropriately.
+  - The graph data is correctly returned.
+
+### **5. Error Handling in `main.py`**
+
+- Ensure that `main.py` handles exceptions and logs errors.
+
+- If an error occurs, `main.py` should exit with a non-zero return code so that `ai_router.py` can detect the failure.
+
+---
+
+## Summary
+
+By modifying `ai_router.py` to run `main.py` as a subprocess and reading the output files generated, you can:
+
+- **Maintain the Back-and-Forth Chat Functionality:**
+  - Conversation history is preserved via the session directory.
+
+- **Return AI Response and Graph Data in JSON Format:**
+  - `api_response.json` is read by `ai_router.py` to construct the API response.
+
+- **Keep `main.py` and Other Scripts Unchanged:**
+  - Only minimal changes are made to `main.py` to accept command-line arguments and use absolute paths.
+
+- **Avoid Complex Import Issues:**
+  - No need to adjust `sys.path` or modify imports.
+
+---
+
+## Let Me Know If You Need Further Assistance
+
+If you have any questions or encounter issues while implementing these steps, please let me know, and I'll be happy to help you troubleshoot further.
