@@ -1,417 +1,248 @@
-Certainly! I'll help you modify your `graph_builder.py` script to meet your requirements:
+But look at how the router is calling the main file right because if I'm trying to create it within the graph builder in the way that you suggested it is giving me error as a response because whatever it is expecting, that is the JSON output being sent back the way it is capturing that output is interfering when we are doing this. Is there any other way to do it?.
 
-1. **Generate `return_json.json`**: Store the graph JSON response in a file named `return_json.json` in the session directory, overwriting it each time.
 
-2. **Generate `node_descriptions.json`**: For each node in `return_json.json`, use the LLM to generate an HTML description (using Tailwind CSS classes) and store these in a JSON file named `node_descriptions.json`, ensuring the IDs match.
 
-3. **Overwrite Existing JSON Files**: Each time the graph is generated, both JSON files should overwrite any existing ones in the session directory.
+ai_router.py (Seperate Python fastapi)::
+"""
+"""
+AI Router Module
 
-4. **Copy JSON Files to Specified Directory**: After generating the JSON files, copy both `return_json.json` and `node_descriptions.json` to `/Users/ysharm12/Documents/orchestra/orchestra/orchestra-backend/app/data/`.
-
----
-
-## **Updated `graph_builder.py` Script**
-
-Below is the modified `graph_builder.py` script incorporating all your requirements:
-
-```python
-# graph_builder.py
-
-import os
-import re
+This module handles all AI-related endpoints, including message processing
+and graph manipulation through natural language commands.
+"""
+from fastapi import APIRouter, HTTPException, status
+from app.schemas.schemas import MessageRequest, MessageResponse
+import logging
+import subprocess
 import json
-import asyncio
-import sys
-import shutil
-from llm import call_graph
+import os
 
-async def read_scripts(session_dir):
-    """
-    Reads all the scripts in the session directory and returns them as a list.
-    """
-    scripts = []
-    script_files = sorted([
-        f for f in os.listdir(session_dir) if f.endswith('.py')
-    ])
+# Configure logging
+logger = logging.getLogger(__name__)
 
-    for filename in script_files:
-        filepath = os.path.join(session_dir, filename)
-        with open(filepath, 'r') as f:
-            code = f.read()
-        version = await extract_version(code) or 1
-        scripts.append({
-            'filename': filename,
-            'version': version,
-            'content': code
-        })
-    return scripts
+router = APIRouter(
+    prefix="/ai",
+    tags=["AI"],
+    responses={
+        404: {"description": "Not found"},
+        500: {"description": "Internal server error"},
+    }
+)
 
-async def extract_version(script_content):
-    """
-    Extracts the version number from the script content.
-    """
-    version_pattern = r'#.*\(Version\s*(\d+)\)'
-    match = re.search(version_pattern, script_content)
-    if match:
-        return int(match.group(1))
-    else:
-        return None
-
-async def generate_graph(scripts, ai_response):
-    """
-    Generates the graph JSON including the AI response.
-    """
-    # Prepare the prompt for the LLM
-    prompt = f"""
-You are an assistant that generates a JSON response for a UI to display a graph.
-The graph represents scripts and their relationships.
-
-Here are the scripts:
-
-"""
-
-    for script in scripts:
-        prompt += f"\n# {script['filename']} (Version {script['version']})\n```python\n{script['content']}\n```\n"
-
-    prompt += f"""
-The AI has the following response to the user:
-
-"{ai_response}"
-
-Your task is to analyze the scripts and generate a JSON response that represents the scripts and their relationships.
-
-The API response must follow this structure:
-
-{{
-    "ai_response": "Text response to user",
-    "nodes": [...],
-    "edges": [...],
-}}
-
-Ensure that:
-- The "ai_response" field contains the AI's response to the user.
-- Nodes and edges accurately represent the relationships between scripts.
-- Positions are assigned to nodes to make the graph visually appealing.
-
-Each node must have these properties:
-- "id": Unique string ID
-- "type": Must be "custom"
-- "position": An object with "x" and "y" coordinates (floats)
-- "data": An object containing:
-    - "label": Display name (script filename)
-    - "type": One of: "input", "process", "output"
-    - "description": Optional description
-    - "inputs": Array of input handles, MUST use "input-0" format
-    - "outputs": Array of output handles, MUST use "output-0" format
-    - "color": Optional color
-
-Each edge must have these properties:
-- "id": Unique string ID (suggested format: "e{{source}}-{{target}}")
-- "source": Source node ID (string)
-- "target": Target node ID (string)
-- "sourceHandle": Must match source node's outputs array
-- "targetHandle": Must match target node's inputs array
-- "animated": Optional, defaults to true
-
-Important Rules:
-
-1. Handle IDs:
-   - Always use zero-based indices: "input-0", "output-0"
-   - Multiple handles should increment: "input-0", "input-1", etc.
-   - Handles in edges must match the node's inputs/outputs arrays
-
-2. Node Types:
-   - "input" nodes should only have outputs
-   - "output" nodes should only have inputs
-   - "process" nodes can have both inputs and outputs
-
-Return only the JSON response without any extra text or comments. The JSON must be valid and parseable.
-"""
-
-    # Call the LLM to generate the graph
-    llm_response = await call_graph(prompt)
-    json_response = await extract_json(llm_response)
-
-    if json_response:
-        return json_response
-    else:
-        print("Failed to generate JSON response from LLM.")
-        return None
-
-async def generate_node_descriptions(scripts, graph_json):
-    """
-    Generates the node_descriptions.json based on the graph_json and scripts.
-    """
-    # Prepare the prompt for the LLM
-    prompt = f"""
-You are an assistant that generates HTML descriptions for nodes in a graph, using Tailwind CSS classes.
-
-Here is the graph JSON:
-
-{json.dumps(graph_json, indent=4)}
-
-Here are the scripts:
-
-"""
-
-    for script in scripts:
-        prompt += f"\n# {script['filename']} (Version {script['version']})\n```python\n{script['content']}\n```\n"
-
-    prompt += """
-Your task is to create a JSON object called node_descriptions, where each key is the node ID, and each value is an object containing:
-
-{
-    "description_html": "<HTML content using Tailwind CSS classes>"
-}
-
-Instructions:
-
-- For each node in the graph JSON, generate an HTML description that provides an overview of the node.
-- Use the script content to inform the description.
-- The HTML should be well-structured and styled using Tailwind CSS classes.
-- Ensure that the node IDs in node_descriptions match the IDs in the graph JSON.
-- Return only the JSON object without any extra text or comments.
-
-Example format:
-
-{
-    "node_id_1": {
-        "description_html": "<div class='...'>...</div>"
-    },
-    "node_id_2": {
-        "description_html": "<div class='...'>...</div>"
-    },
-    ...
-}
-"""
-
-    # Call the LLM to generate the node descriptions
-    llm_response = await call_graph(prompt)
-    node_descriptions = await extract_json(llm_response)
-
-    if node_descriptions:
-        return node_descriptions
-    else:
-        print("Failed to generate node descriptions from LLM.")
-        return None
-
-async def extract_json(text):
-    """
-    Extracts JSON content from the LLM response.
-    """
-    # Try to find the first occurrence of '{' and the last occurrence of '}' and extract the JSON
+@router.post(
+    "/message",
+    response_model=MessageResponse,
+    summary="Process a user message",
+    description="""
+    Process a message from the user and return an AI response along with any graph updates.
+    
+    The endpoint accepts natural language commands such as:
+    - "add node": Creates a new node
+    - "remove node X": Removes node number X
+    - "list nodes": Lists all current nodes
+    
+    The response includes:
+    - AI's text response
+    - Any new or updated nodes
+    - Any new or updated edges between nodes
+    """,
+    responses={
+        200: {
+            "description": "Successful response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ai_response": "Node 1 added successfully.",
+                        "nodes": [{
+                            "id": "123e4567-e89b-12d3-a456-426614174000",
+                            "type": "default",
+                            "data": {"label": "Node 1"},
+                            "position": {"x": 250.0, "y": 150.0}
+                        }],
+                        "edges": []
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Bad request",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "User message cannot be empty."
+                    }
+                }
+            }
+        }
+    }
+)
+async def process_message(request: MessageRequest):
+    logger.info(f"Processing user message: {request.user_message}")
     try:
-        json_start = text.find('{')
-        json_end = text.rfind('}') + 1
-        json_text = text[json_start:json_end]
-        json_response = json.loads(json_text)
-        return json_response
-    except (ValueError, json.JSONDecodeError) as e:
-        print(f"JSON decode error: {e}")
-        return None
+        # Validate user message
+        if not request.user_message.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User message cannot be empty."
+            )
+
+        # Paths to scripts and session directory
+        main_script_path = '/Users/ysharm12/Documents/orchestra/AI/main.py'
+        session_dir = '/Users/ysharm12/Documents/orchestra/AI/sessions/static_session'
+
+        # Ensure the session directory exists
+        os.makedirs(session_dir, exist_ok=True)
+
+        # Run main.py as a subprocess with the user message
+        result = subprocess.run(
+            ['python3', main_script_path, request.user_message],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            # Handle error
+            logger.error(f"Error running main.py: {result.stderr}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error processing the AI response."
+            )
+
+        # Read the api_response.json file generated by main.py
+        api_response_file = os.path.join(session_dir, 'api_response.json')
+        if os.path.exists(api_response_file):
+            with open(api_response_file, 'r') as f:
+                api_response = json.load(f)
+        else:
+            logger.error("api_response.json not found.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="AI response not found."
+            )
+
+        # Construct the MessageResponse object
+        response = MessageResponse(
+            ai_response=api_response.get('ai_response', ''),
+            nodes=api_response.get('nodes', []),
+            edges=api_response.get('edges', [])
+        )
+
+        logger.info(f"Successfully generated AI response for user message: {request.user_message}")
+        return response
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        # Log the actual error but return a generic message
+        logger.error(f"Error processing AI message: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing your request. Please try again later."
+        )
+        """
+
+
+main.py:
+"""
+# /Users/ysharm12/Documents/orchestra/AI/main.py
+
+import asyncio
+import os
+import sys
+import uuid
+import re
+import subprocess
+from parent_agent import process_user_input
+from llm import call_parent
 
 async def main():
-    if len(sys.argv) != 2:
-        print("Usage: python3 graph_builder.py <session_dir>")
-        return
+    # Check if user input is provided as a command-line argument
+    if len(sys.argv) > 1:
+        user_input = sys.argv[1]
+    else:
+        # Interactive mode
+        user_input = input("\nEnter your query or modification request: ")
 
-    session_dir = sys.argv[1]
+    # Use a static session ID (can be made dynamic if needed)
+    session_id = 'static_session'
 
-    # Read the AI response from the session folder
+    # Create a session directory
+    session_dir = os.path.join('/Users/ysharm12/Documents/orchestra/AI/sessions', session_id)
+    os.makedirs(session_dir, exist_ok=True)
+
+    ai_response, scripts = await process_user_input(user_input, session_dir)
+
+    if not scripts:
+        print("No scripts were generated or updated.")
+    else:
+        # Save scripts to files
+        await save_scripts(scripts, session_dir)
+
+    # Save the AI response
+    await save_ai_response(ai_response, session_dir)
+
+    # Display the AI response
+    print("\nAI Response:")
+    print(ai_response)
+
+    # Update the graph
+    await run_graph_builder(session_dir)
+
+async def save_scripts(scripts, session_dir):
+    """
+    Saves the scripts to files in the session directory.
+    Removes older versions when a script is updated.
+    """
+    for script in scripts:
+        filename = script["filename"]
+        version = script["version"]
+        content = script["content"]
+
+        # Remove older versions of the script
+        existing_files = [f for f in os.listdir(session_dir) if f == filename]
+        for existing_file in existing_files:
+            os.remove(os.path.join(session_dir, existing_file))
+
+        # Save the new script
+        script_path = os.path.join(session_dir, filename)
+        with open(script_path, 'w') as f:
+            # Add the header with filename and version
+            header = f"# {filename} (Version {version})\n"
+            f.write(header + '\n' + content)
+
+        print(f"Saved script: {filename} (Version {version})")
+
+async def save_ai_response(ai_response, session_dir):
+    """
+    Saves the AI's response to the user in the session directory.
+    """
     ai_response_file = os.path.join(session_dir, 'ai_response.txt')
-    if os.path.exists(ai_response_file):
-        with open(ai_response_file, 'r') as f:
-            ai_response = f.read().strip()
-    else:
-        ai_response = ""
+    with open(ai_response_file, 'w') as f:
+        f.write(ai_response)
 
-    scripts = await read_scripts(session_dir)
-    graph_json = await generate_graph(scripts, ai_response)
+async def run_graph_builder(session_dir):
+    """
+    Runs the graph_builder.py script to generate the API response.
+    """
+    # Path to graph_builder.py
+    graph_builder_path = os.path.join('/Users/ysharm12/Documents/orchestra/AI', 'graph_builder.py')
 
-    if graph_json:
-        # Save the graph JSON to return_json.json
-        return_json_file = os.path.join(session_dir, 'return_json.json')
-        with open(return_json_file, 'w') as f:
-            json.dump(graph_json, f, indent=4)
-        print(f"Saved graph JSON to {return_json_file}")
-
-        # Generate node_descriptions.json
-        node_descriptions = await generate_node_descriptions(scripts, graph_json)
-        if node_descriptions:
-            node_descriptions_file = os.path.join(session_dir, 'node_descriptions.json')
-            with open(node_descriptions_file, 'w') as f:
-                json.dump(node_descriptions, f, indent=4)
-            print(f"Saved node descriptions to {node_descriptions_file}")
+    try:
+        result = subprocess.run(
+            ['python3', graph_builder_path, session_dir],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            api_response = result.stdout
+            print("\nUpdated API Response:")
+            print(api_response)
         else:
-            print("No valid node descriptions generated.")
-
-        # Copy JSON files to the specified directory
-        target_dir = '/Users/ysharm12/Documents/orchestra/orchestra/orchestra-backend/app/data/'
-        os.makedirs(target_dir, exist_ok=True)
-
-        # Copy return_json.json
-        shutil.copy(return_json_file, target_dir)
-        print(f"Copied {return_json_file} to {target_dir}")
-
-        # Copy node_descriptions.json
-        shutil.copy(node_descriptions_file, target_dir)
-        print(f"Copied {node_descriptions_file} to {target_dir}")
-
-    else:
-        print("No valid graph JSON generated.")
+            print("Graph builder failed:")
+            print(result.stderr)
+    except Exception as e:
+        print(f"An error occurred while running graph_builder.py: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
-```
-
----
-
-## **Explanation of Changes**
-
-1. **Generating `return_json.json`:**
-
-   - The graph JSON is now saved to `return_json.json` in the session directory, overwriting it each time.
-
-     ```python
-     return_json_file = os.path.join(session_dir, 'return_json.json')
-     with open(return_json_file, 'w') as f:
-         json.dump(graph_json, f, indent=4)
-     ```
-
-2. **Generating `node_descriptions.json`:**
-
-   - Added the `generate_node_descriptions` function, which:
-
-     - Constructs a prompt for the LLM using the `graph_json` and the scripts.
-     - Asks the LLM to generate HTML descriptions for each node, using Tailwind CSS classes.
-     - The IDs in `node_descriptions.json` match the node IDs in `return_json.json`.
-
-     ```python
-     node_descriptions = await generate_node_descriptions(scripts, graph_json)
-     ```
-
-   - The `node_descriptions.json` is saved in the session directory, overwriting it each time.
-
-     ```python
-     node_descriptions_file = os.path.join(session_dir, 'node_descriptions.json')
-     with open(node_descriptions_file, 'w') as f:
-         json.dump(node_descriptions, f, indent=4)
-     ```
-
-3. **Copying JSON Files to the Specified Directory:**
-
-   - After generating both JSON files, they are copied to the target directory:
-
-     ```python
-     target_dir = '/Users/ysharm12/Documents/orchestra/orchestra/orchestra-backend/app/data/'
-     os.makedirs(target_dir, exist_ok=True)
-
-     shutil.copy(return_json_file, target_dir)
-     shutil.copy(node_descriptions_file, target_dir)
-     ```
-
-4. **Ensuring IDs Match:**
-
-   - By using the `graph_json` directly when generating the node descriptions, we ensure that the IDs in both JSON files match.
-
----
-
-## **Additional Notes**
-
-- **Overwriting Existing JSON Files:**
-
-  - The script overwrites `return_json.json` and `node_descriptions.json` in the session directory each time it's run.
-
-- **Ensuring the LLM Generates Valid JSON:**
-
-  - The prompts instruct the LLM to return only the JSON object without extra text.
-  - The `extract_json` function attempts to parse the JSON from the LLM's response.
-
-- **Error Handling:**
-
-  - If the LLM fails to generate valid JSON, the script prints an error message.
-  - It's important to monitor the LLM's output and adjust the prompts if necessary to ensure valid JSON is returned.
-
-- **Paths and Permissions:**
-
-  - Ensure that the script has the necessary permissions to read and write in both the session directory and the target directory.
-  - The `os.makedirs` function with `exist_ok=True` ensures that the target directory exists before copying files.
-
----
-
-## **Testing the Updated Script**
-
-1. **Run `main.py` as Before:**
-
-   - Make sure that `main.py` invokes `run_graph_builder(session_dir)` after processing user input.
-
-2. **Verify JSON Files in Session Directory:**
-
-   - After running `main.py` and entering a user query, check the session directory to see if `return_json.json` and `node_descriptions.json` are generated and overwritten.
-
-3. **Check the Target Directory:**
-
-   - Ensure that both JSON files are copied to `/Users/ysharm12/Documents/orchestra/orchestra/orchestra-backend/app/data/` and are updated.
-
-4. **Validate JSON Content:**
-
-   - Open the JSON files to ensure that:
-
-     - `return_json.json` contains the graph data with nodes and edges.
-     - `node_descriptions.json` contains HTML descriptions for each node, with IDs matching those in `return_json.json`.
-
----
-
-## **Example of Generated `node_descriptions.json`**
-
-Given the LLM prompt and example, the `node_descriptions.json` might look like:
-
-```json
-{
-    "1": {
-        "description_html": "<div class='p-6 space-y-4'><h2 class='text-2xl font-bold text-gray-900'>Input Node</h2><div class='bg-blue-50 p-4 rounded-lg'>...</div></div>"
-    },
-    "2": {
-        "description_html": "<div class='p-6 space-y-4'><h2 class='text-2xl font-bold text-gray-900'>Processing Node</h2><div class='bg-purple-50 p-4 rounded-lg'>...</div></div>"
-    },
-    "3": {
-        "description_html": "<div class='p-6 space-y-4'><h2 class='text-2xl font-bold text-gray-900'>Output Node</h2><div class='bg-green-50 p-4 rounded-lg'>...</div></div>"
-    }
-}
-```
-
----
-
-## **Potential Issues and Solutions**
-
-- **LLM Fails to Generate Valid JSON:**
-
-  - **Issue:** The LLM might include extra text or comments in its response, causing JSON parsing to fail.
-  - **Solution:** Refine the prompts to be more explicit, emphasizing that it should return only the JSON object.
-
-- **IDs Do Not Match:**
-
-  - **Issue:** If the LLM generates node IDs that don't match those in `return_json.json`.
-  - **Solution:** Ensure the prompt instructs the LLM to use the same IDs from the `graph_json`.
-
-- **File Permissions:**
-
-  - **Issue:** The script may not have permission to write to the target directory.
-  - **Solution:** Adjust the permissions of the directories or run the script with appropriate privileges.
-
----
-
-## **Summary**
-
-- **Modified `graph_builder.py`** to:
-
-  - Generate `return_json.json` and `node_descriptions.json` in the session directory.
-  - Overwrite these files each time the graph is generated.
-  - Copy both JSON files to the specified target directory.
-  - Ensure node IDs match in both JSON files.
-
-- **Ensured that the LLM is used** to generate both the graph JSON and the node descriptions, maintaining the original functionality and integrating the new requirements.
-
----
-
-Please let me know if you need any further assistance or adjustments to the script!
+"""
